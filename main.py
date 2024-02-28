@@ -414,7 +414,7 @@ def generic_predict(
         predicted_probs = F.softmax(
             model(gene_net_data, disease_net_data, x_in).clone().detach(), dim=1
         )[:, -1:]
-    input_tuples['Score'] = predicted_probs.numpy()
+    input_tuples['Score'] = predicted_probs.cpu().numpy()
 
     if sort_result_by_score:
         input_tuples.sort_values(by=['Score'], inplace=True, ascending=False)
