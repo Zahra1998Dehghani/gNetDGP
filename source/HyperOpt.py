@@ -171,6 +171,7 @@ class HyperOptmisation():
         from hyperopt import fmin, tpe, hp, anneal, Trials
         
         def optimise_params(config):
+            fold = 0
             kf = KFold(n_splits=folds, shuffle=True, random_state=42)
             for train_index, test_index in kf.split(cov_diseases):
                 fold += 1
