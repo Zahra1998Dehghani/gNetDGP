@@ -23,19 +23,20 @@ def cli():
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
 @click.option('--model_tmp_storage', default='/tmp')
 @click.option('--results_storage', default='./out')
-@click.option('--experiment_slug', default='train_generic')
+#@click.option('--experiment_slug', default='train_generic')
 def optimise_parameters(
-            folds,
-            max_epochs,
-            early_stopping_window,
-            gene_dataset_root,
-            disease_dataset_root,
-            training_data_path,
-            model_tmp_storage,
-            results_storage
+        folds,
+        max_epochs,
+        early_stopping_window,
+        gene_dataset_root,
+        disease_dataset_root,
+        training_data_path,
+        model_tmp_storage,
+        results_storage
 ):
     opt =  HyperOptmisation()
-    opt.run_optimisation(folds,
+    opt.run_optimisation(
+        folds,
         max_epochs,
         early_stopping_window,
         gene_dataset_root,
@@ -876,6 +877,7 @@ def specific_predict(
 
 
 if __name__ == '__main__':
+    cli.add_command(optimise_parameters)
     cli.add_command(generic_train)
     cli.add_command(generic_predict)
     cli.add_command(specific_train)
