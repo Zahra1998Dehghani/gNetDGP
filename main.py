@@ -10,20 +10,14 @@ def cli():
     pass
 
 @click.command()
-#@click.option('--fc_hidden_dim', default=3000)
-#@click.option('--gene_net_hidden_dim', default=830)
-#@click.option('--disease_net_hidden_dim', default=500)
 @click.option('--folds', default=5)
 @click.option('--max_epochs', default=500)
 @click.option('--early_stopping_window', default=20)
-#@click.option('--lr', default=0.00004, help='Learning rate')
-#@click.option('--weight_decay', default=0.15)
 @click.option('--gene_dataset_root', default='./data/gene_net')
 @click.option('--disease_dataset_root', default='./data/disease_net')
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
 @click.option('--model_tmp_storage', default='/tmp')
 @click.option('--results_storage', default='./out')
-#@click.option('--experiment_slug', default='train_generic')
 def optimise_parameters(
         folds,
         max_epochs,

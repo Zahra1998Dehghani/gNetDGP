@@ -15,6 +15,10 @@ import numpy as np
 from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import KFold, train_test_split
 
+from source.DiseaseNet import DiseaseNet
+from source.GeneNet import GeneNet
+from source.gNetDGPModel import gNetDGPModel
+
 
 class HyperOptmisation():
     def __init__(self):
@@ -23,9 +27,14 @@ class HyperOptmisation():
     
     def run_optimisation(self, folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, model_tmp_storage, results_storage):
         print("Running optimisation...")
-
-
-    def create_objective():
+        print("Creating datasets folds...")
+        negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping = self.setup_data(gene_dataset_root, disease_dataset_root, training_data_path)
+        self.train_optimise(negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs)
+        print("Setting up optimisation values...")
+        print("Best values of hyperparameters")
+        print("Finished optimisation")
+ 
+    def create_objective(self):
         #train_loader, test_loader = load_data()  # Load some data
         #model = ConvNet().to("cpu")  # Create a PyTorch conv net
         optimizer = torch.optim.SGD(  # Tune the optimizer
@@ -49,9 +58,10 @@ class HyperOptmisation():
         print("Best config is:", results.get_best_result().config)
 
 
-    def setup_data(folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, model_tmp_storage, results_storage):
+    def setup_data(self, gene_dataset_root, disease_dataset_root, training_data_path):
         print('Load the gene and disease graphs.')
-        gene_dataset = GeneNet(root=gene_dataset_root,
+        gene_dataset = GeneNet(
+            root=gene_dataset_root,
             humannet_version='FN',
             features_to_use=['hpo'],
             skip_truncated_svd=True
@@ -69,13 +79,11 @@ class HyperOptmisation():
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        gene_net_data = gene_dataset[0]
-        disease_net_data = disease_dataset[0]
+        self.gene_net_data = gene_dataset[0]
+        self.disease_net_data = disease_dataset[0]
 
-        gene_net_data = gene_dataset[0]
-        disease_net_data = disease_dataset[0]
-        gene_net_data = gene_net_data.to(device)
-        disease_net_data = disease_net_data.to(device)
+        self.gene_net_data = self.gene_net_data.to(device)
+        self.disease_net_data = self.disease_net_data.to(device)
 
         print('Generate training data.')
         disease_genes = pd.read_table(
@@ -106,156 +114,155 @@ class HyperOptmisation():
             disease_id = covered_diseases[np.random.randint(0, len(covered_diseases))]
             if not ((positives['OMIM ID'] == disease_id) & (positives['EntrezGene ID'] == gene_id)).any():
                 negatives_list.append([disease_id, gene_id])
-            negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
+        negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
+        return negatives, positives, covered_diseases, gene_id_index_feature_mapping, disease_id_index_feature_mapping
 
-        def get_training_data_from_indexes(indexes, monogenetic_disease_only=False, multigenetic_diseases_only=False):
-            train_tuples = set()
-            for idx in indexes:
-                pos = positives[positives['OMIM ID'] == covered_diseases[idx]]
-                neg = negatives[negatives['OMIM ID'] == covered_diseases[idx]]
-                if monogenetic_disease_only and len(pos) != 1:
-                    continue
-                if multigenetic_diseases_only and len(pos) == 1:
-                    continue
-                for index, row in pos.iterrows():
-                    train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 1))
-                for index, row in neg.iterrows():
-                    train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 0))
+
+    def get_training_data_from_indexes(self, indexes, negatives, positives, covered_diseases, gene_id_index_feature_mapping, disease_id_index_feature_mapping, monogenetic_disease_only=False, multigenetic_diseases_only=False):
+        train_tuples = set()
+        for idx in indexes:
+            pos = positives[positives['OMIM ID'] == covered_diseases[idx]]
+            neg = negatives[negatives['OMIM ID'] == covered_diseases[idx]]
+            if monogenetic_disease_only and len(pos) != 1:
+                continue
+            if multigenetic_diseases_only and len(pos) == 1:
+                continue
+            for index, row in pos.iterrows():
+                train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 1))
+            for index, row in neg.iterrows():
+                train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 0))
             
-            n = len(train_tuples)           
-            x_out = np.ones((n, 2)) # will contain (gene_idx, disease_idx) tuples
-            y_out = torch.ones((n,), dtype=torch.long)
-            for i, (omim_id, gene_id, y) in enumerate(train_tuples):
-                x_out[i] = (gene_id_index_feature_mapping[int(gene_id)], disease_id_index_feature_mapping[omim_id])
-                y_out[i] = y
-            return x_out, y_out
-
-
-    def train(
-            max_epochs,
-            early_stopping_window=5,
-            info_each_epoch=1,
-            folds=5,
-            lr=0.0005,
-            weight_decay=5e-4,
-            fc_hidden_dim=2048,
-            gene_net_hidden_dim=512,
-            disease_net_hidden_dim=512
+        n = len(train_tuples)           
+        x_out = np.ones((n, 2)) # will contain (gene_idx, disease_idx) tuples
+        y_out = torch.ones((n,), dtype=torch.long)
+        for i, (omim_id, gene_id, y) in enumerate(train_tuples):
+            x_out[i] = (gene_id_index_feature_mapping[int(gene_id)], disease_id_index_feature_mapping[omim_id])
+            y_out[i] = y
+        return x_out, y_out
+        
+    
+    def train_optimise(
+        self,
+        negatives,
+        positives,
+        cov_diseases, 
+        g_i_f_mapping,
+        d_i_i_mapping,
+        max_epochs=5,
+        early_stopping_window=5,
+        info_each_epoch=1,
+        folds=5, 
+        #lr=0.0005,
+        #weight_decay=5e-4,
+        #fc_hidden_dim=2048,
+        #gene_net_hidden_dim=512,
+        #disease_net_hidden_dim=512
     ):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([0.2, 0.8]).to(device))
         metrics = []
         dis_dict = {}
         fold = 0
         start_time = time.time()
-        kf = KFold(n_splits=folds, shuffle=True, random_state=42)
-        for train_index, test_index in kf.split(covered_diseases):
-            fold += 1
-            print(f'Generate training data for fold {fold}.')
-            all_train_x, all_train_y = get_training_data_from_indexes(train_index)
+        gene_net_data = self.gene_net_data
+        disease_net_data = self.disease_net_data
 
-            # Split into train and validation set.
-            id_tr, id_val = train_test_split(range(len(all_train_x)), test_size=0.1, random_state=42)
-            train_x = all_train_x[id_tr]
-            train_y = all_train_y[id_tr].to(device)
-            val_x = all_train_x[id_val]
-            val_y = all_train_y[id_val].to(device)
+        from hyperopt import hp
+        from hyperopt import fmin, tpe, hp, anneal, Trials
+        
+        def optimise_params(config):
+            kf = KFold(n_splits=folds, shuffle=True, random_state=42)
+            for train_index, test_index in kf.split(cov_diseases):
+                fold += 1
+                print(f'Generate training data for fold {fold}.')
+                all_train_x, all_train_y = self.get_training_data_from_indexes(train_index, negatives, positives, cov_diseases, g_i_f_mapping, d_i_i_mapping)
 
-            # Generate the test data for mono and multigenetic diseases.
-            ## 1. Collect data.
-            print(f'Generate test data for fold {fold}.')
-            test_x = dict()
-            test_y = dict()
-            test_x['mono'], test_y['mono'] = get_training_data_from_indexes(test_index, monogenetic_disease_only=True)
-            test_y['mono'] = test_y['mono'].to(device)
-            test_x['multi'], test_y['multi'] = get_training_data_from_indexes(test_index,
-                                                                              multigenetic_diseases_only=True)
-            test_y['multi'] = test_y['multi'].to(device)
+                # Split into train and validation set.
+                id_tr, id_val = train_test_split(range(len(all_train_x)), test_size=0.1, random_state=42)
+                train_x = all_train_x[id_tr]
+                train_y = all_train_y[id_tr].to(device)
+                val_x = all_train_x[id_val]
+                val_y = all_train_y[id_val].to(device)
 
-            # Create the model
-            model = gNetDGPModel(
-                gene_feature_dim=gene_net_data.x.shape[1],
-                disease_feature_dim=disease_net_data.x.shape[1],
-                fc_hidden_dim=fc_hidden_dim,
-                gene_net_hidden_dim=gene_net_hidden_dim,
-                disease_net_hidden_dim=disease_net_hidden_dim,
-                mode='DGP'
-            ).to(device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-            print(f'Stat training fold {fold}/{folds}:')
+                # Generate the test data for mono and multigenetic diseases.
+                ## 1. Collect data.
+                print(f'Generate test data for fold {fold}.')
+                test_x = dict()
+                test_y = dict()
+                test_x['mono'], test_y['mono'] = self.get_training_data_from_indexes(test_index, negatives, positives, cov_diseases, g_i_f_mapping, d_i_i_mapping, monogenetic_disease_only=True)
+                test_y['mono'] = test_y['mono'].to(device)
+                test_x['multi'], test_y['multi'] = self.get_training_data_from_indexes(test_index, negatives, positives, cov_diseases, g_i_f_mapping, d_i_i_mapping, multigenetic_diseases_only=True)
+                test_y['multi'] = test_y['multi'].to(device)
 
-            losses = dict()
-            losses['train'] = list()
-            losses['val'] = list()
+                # Create the model
+                model = gNetDGPModel(
+                    gene_feature_dim=gene_net_data.x.shape[1],
+                    disease_feature_dim=disease_net_data.x.shape[1],
+                    fc_hidden_dim=2048,
+                    gene_net_hidden_dim=512,
+                    disease_net_hidden_dim=512,
+                    mode='DGP'
+                ).to(device)
+            
+                config = { 
+                   'learning_rate': config['learning_rate']
+                }
+                optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=0.18)
+            
+                print(f'Stat training fold {fold}/{folds}:')
 
-            losses['mono'] = {
-                'AUC': 0,
-                'TPR': None,
-                'FPR': None
-            }
-            losses['multi'] = {
-                'AUC': 0,
-                'TPR': None,
-                'FPR': None
-            }
+                losses = dict()
+                losses['train'] = list()
+                losses['val'] = list()
 
-            best_val_loss = 1e80
-            for epoch in range(max_epochs):
-                # Train model.
-                model.train()
-                optimizer.zero_grad()
-                out = model(gene_net_data, disease_net_data, train_x)
-                loss = criterion(out, train_y)
-                loss.backward()
-                optimizer.step()
-                losses['train'].append(loss.item())
+                losses['mono'] = {
+                    'AUC': 0,
+                    'TPR': None,
+                    'FPR': None
+                }
+                losses['multi'] = {
+                    'AUC': 0,
+                    'TPR': None,
+                    'FPR': None
+                }
 
-                # Validation.
-                with torch.no_grad():
-                    model.eval()
-                    out = model(gene_net_data, disease_net_data, val_x)
-                    loss = criterion(out, val_y)
-                    current_val_loss = loss.item()
-                    losses['val'].append(current_val_loss)
+                best_val_loss = 1e80
+                for epoch in range(max_epochs):
+                    # Train model.
+                    model.train()
+                    optimizer.zero_grad()
+                    out = model(gene_net_data, disease_net_data, train_x)
+                    loss = criterion(out, train_y)
+                    loss.backward()
+                    optimizer.step()
+                    losses['train'].append(loss.item())
 
-                    if epoch % info_each_epoch == 0:
-                        print(
-                            'Epoch {}, train_loss: {:.4f}, val_loss: {:.4f}'.format(
-                                epoch, losses['train'][epoch], losses['val'][epoch]
+                    # Validation.
+                    with torch.no_grad():
+                        model.eval()
+                        out = model(gene_net_data, disease_net_data, val_x)
+                        loss = criterion(out, val_y)
+                        current_val_loss = loss.item()
+                        losses['val'].append(current_val_loss)
+
+                        if epoch % info_each_epoch == 0:
+                            print(
+                                'Epoch {}, train_loss: {:.4f}, val_loss: {:.4f}'.format(
+                                    epoch, losses['train'][epoch], losses['val'][epoch]
+                                )
                             )
-                        )
-                    if current_val_loss < best_val_loss:
-                        best_val_loss = current_val_loss
-                        torch.save(model.state_dict(), osp.join(model_tmp_storage, f'best_model_fold_{fold}.ptm'))
-
-                # Early stopping
-                if epoch > early_stopping_window:
-                    # Stop if validation error did not decrease
-                    # w.r.t. the past early_stopping_window consecutive epochs.
-                    last_window_losses = losses['val'][epoch - early_stopping_window:epoch]
-                    if losses['val'][-1] > max(last_window_losses):
-                        print('Early Stopping!')
-                        break
-
-            # Test the model for the current fold.
-            model.load_state_dict(
-                torch.load(osp.join(model_tmp_storage, f'best_model_fold_{fold}.ptm'), map_location=device)
-            )
-            with torch.no_grad():
-                for modus in ['multi', 'mono']:
-                    predicted_probs = F.log_softmax(
-                        model(gene_net_data, disease_net_data, test_x[modus]).clone().detach(), dim=1
-                    )
-                    true_y = test_y[modus]
-                    fpr, tpr, _ = roc_curve(true_y.cpu().detach().numpy(), predicted_probs[:, 1].cpu().detach().numpy(),
-                                            pos_label=1)
-                    roc_auc = auc(fpr, tpr)
-                    losses[modus]['TEST_Y'] = true_y.cpu().detach().numpy()
-                    losses[modus]['TEST_PREDICT'] = predicted_probs.cpu().numpy()
-                    losses[modus]['AUC'] = roc_auc
-                    losses[modus]['TPR'] = tpr
-                    losses[modus]['FPR'] = fpr
-                    print(f'"{modus}" auc for fold: {fold}: {roc_auc}')
-            metrics.append(losses)
-
-        print('Done!')
-        return metrics, dis_dict, model
+            return np.mean(losses['val'])
+            
+        space_params = {
+            'learning_rate': hp.loguniform('learning_rate', -5, 0)
+        }
+        trails = Trials()
+        best=fmin(fn=optimise_params, # function to optimize
+              space=space_params, 
+              algo=tpe.suggest, # optimization algorithm, hyperotp will select its parameters automatically
+              max_evals=3, # maximum number of iterations
+              trials=trails, # logging
+              #rstate=np.random.RandomState(random_state) # fixing random state for the reproducibility
+        )
+        print("Optimisation finished...")
+        print(best)
