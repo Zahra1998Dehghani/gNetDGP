@@ -2,6 +2,18 @@ import torch
 import torch.nn.functional as F
 from ray import train, tune
 from ray.tune.search.optuna import OptunaSearch
+import gzip
+import random
+import pickle
+import os
+import os.path as osp
+import torch
+import time
+import torch.nn.functional as F
+import pandas as pd
+import numpy as np
+from sklearn.metrics import roc_curve, auc
+from sklearn.model_selection import KFold, train_test_split
 
 
 class HyperOptmisation():
@@ -32,6 +44,96 @@ class HyperOptmisation():
                 )
         results = tuner.fit()
         print("Best config is:", results.get_best_result().config)
+
+    def setup_data(folds,
+            max_epochs,
+            early_stopping_window,
+            gene_dataset_root,
+            disease_dataset_root,
+            training_data_path,
+            model_tmp_storage,
+            results_storage):
+                
+        print('Load the gene and disease graphs.')
+        gene_dataset = GeneNet(root=gene_dataset_root,
+            humannet_version='FN',
+            features_to_use=['hpo'],
+            skip_truncated_svd=True
+        )
+
+        disease_dataset = DiseaseNet(
+            root=disease_dataset_root,
+            hpo_count_freq_cutoff=40,
+            edge_source='feature_similarity',
+            feature_source=['disease_publications'],
+            skip_truncated_svd=True,
+            svd_components=2048,
+            svd_n_iter=12
+        )
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        gene_net_data = gene_dataset[0]
+        disease_net_data = disease_dataset[0]
+
+        gene_net_data = gene_dataset[0]
+        disease_net_data = disease_dataset[0]
+        gene_net_data = gene_net_data.to(device)
+        disease_net_data = disease_net_data.to(device)
+
+        print('Generate training data.')
+        disease_genes = pd.read_table(
+            training_data_path
+            names=['EntrezGene ID', 'OMIM ID'],
+            sep='\t',
+            low_memory=False,
+            dtype={'EntrezGene ID': pd.Int64Dtype()}
+        )
+
+        disease_id_index_feature_mapping = disease_dataset.load_disease_index_feature_mapping()
+        gene_id_index_feature_mapping = gene_dataset.load_node_index_mapping()
+
+        all_genes = list(gene_id_index_feature_mapping.keys())
+        all_diseases = list(disease_id_index_feature_mapping.keys())
+
+        # 1. generate positive pairs.
+        # Filter the pairs to only include the ones where the corresponding nodes are available.
+        # i.e. gene_id should be in all_genes and disease_id should be in all_diseases.
+        positives = disease_genes[
+            disease_genes["OMIM ID"].isin(all_diseases) & disease_genes["EntrezGene ID"].isin(all_genes)
+        ]
+        covered_diseases = list(set(positives['OMIM ID']))
+        covered_genes = list(set(positives['EntrezGene ID']))
+        negatives_list = []
+        while len(negatives_list) < len(positives):
+            gene_id = all_genes[np.random.randint(0, len(all_genes))]
+            disease_id = covered_diseases[np.random.randint(0, len(covered_diseases))]
+            if not ((positives['OMIM ID'] == disease_id) & (positives['EntrezGene ID'] == gene_id)).any():
+                negatives_list.append([disease_id, gene_id])
+            negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
+
+        def get_training_data_from_indexes(indexes, monogenetic_disease_only=False, multigenetic_diseases_only=False):
+            train_tuples = set()
+            for idx in indexes:
+                pos = positives[positives['OMIM ID'] == covered_diseases[idx]]
+                neg = negatives[negatives['OMIM ID'] == covered_diseases[idx]]
+                if monogenetic_disease_only and len(pos) != 1:
+                    continue
+                if multigenetic_diseases_only and len(pos) == 1:
+                    continue
+                for index, row in pos.iterrows():
+                    train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 1))
+                                                                                                                                                                                                                           for index, row in neg.iterrows():         
+                    train_tuples.add((row['OMIM ID'], row['EntrezGene ID'], 0))
+                                                                                                                                                                                                                       ## 2. Concat data.                                                                                                                                                                                        
+            n = len(train_tuples)                                                                                                                                                                                                
+            x_out = np.ones((n, 2))  # will contain (gene_idx, disease_idx) tuples.
+            y_out = torch.ones((n,), dtype=torch.long)
+            for i, (omim_id, gene_id, y) in enumerate(train_tuples):
+                x_out[i] = (gene_id_index_feature_mapping[int(gene_id)], disease_id_index_feature_mapping[omim_id])
+                y_out[i] = y
+            return x_out, y_out
+
 
     def train(
             max_epochs,
