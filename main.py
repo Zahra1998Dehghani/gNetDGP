@@ -50,9 +50,9 @@ def optimise_parameters(
 
     print('Load the gene and disease graphs.')
     gene_dataset = GeneNet(root=gene_dataset_root,
-            humannet_version='FN',
-            features_to_use=['hpo'],
-            skip_truncated_svd=True
+        humannet_version='FN',
+        features_to_use=['hpo'],
+        skip_truncated_svd=True
     )
 
     disease_dataset = DiseaseNet(
@@ -99,12 +99,12 @@ def optimise_parameters(
     covered_diseases = list(set(positives['OMIM ID']))
     covered_genes = list(set(positives['EntrezGene ID']))
     negatives_list = []
-        while len(negatives_list) < len(positives):
-            gene_id = all_genes[np.random.randint(0, len(all_genes))]
-            disease_id = covered_diseases[np.random.randint(0, len(covered_diseases))]
-            if not ((positives['OMIM ID'] == disease_id) & (positives['EntrezGene ID'] == gene_id)).any():
-                negatives_list.append([disease_id, gene_id])
-                negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
+    while len(negatives_list) < len(positives):
+        gene_id = all_genes[np.random.randint(0, len(all_genes))]
+        disease_id = covered_diseases[np.random.randint(0, len(covered_diseases))]
+        if not ((positives['OMIM ID'] == disease_id) & (positives['EntrezGene ID'] == gene_id)).any():
+            negatives_list.append([disease_id, gene_id])
+        negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
 
         def get_training_data_from_indexes(indexes, monogenetic_disease_only=False, multigenetic_diseases_only=False):
             train_tuples = set()
@@ -126,9 +126,10 @@ def optimise_parameters(
             for i, (omim_id, gene_id, y) in enumerate(train_tuples):
                 x_out[i] = (gene_id_index_feature_mapping[int(gene_id)], disease_id_index_feature_mapping[omim_id])
                 y_out[i] = y
-                return x_out, y_out
+            return x_out, y_out
 
-            
+    opt =  HyperOptmisation()
+    opt.run_optimisation()
 
 
 
