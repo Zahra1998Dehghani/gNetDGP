@@ -21,9 +21,6 @@ from source.gNetDGPModel import gNetDGPModel
 
 
 class HyperOptmisation():
-    def __init__(self):
-        self.config = None
-        #self.model = model
     
     def run_optimisation(self, folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, model_tmp_storage, results_storage):
         print("Running optimisation...")
@@ -152,11 +149,11 @@ class HyperOptmisation():
         early_stopping_window=5,
         info_each_epoch=1,
         folds=5, 
-        #lr=0.0005,
-        #weight_decay=5e-4,
-        #fc_hidden_dim=2048,
-        #gene_net_hidden_dim=512,
-        #disease_net_hidden_dim=512
+        lr=0.0005,
+        weight_decay=5e-4,
+        fc_hidden_dim=2048,
+        gene_net_hidden_dim=512,
+        disease_net_hidden_dim=512
     ):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([0.2, 0.8]).to(device))
@@ -164,8 +161,8 @@ class HyperOptmisation():
         dis_dict = {}
         fold = 0
         start_time = time.time()
-        gene_net_data = self.gene_net_data
-        disease_net_data = self.disease_net_data
+        #gene_net_data = self.gene_net_data
+        #disease_net_data = self.disease_net_data
 
         from hyperopt import hp
         from hyperopt import fmin, tpe, hp, anneal, Trials
@@ -197,18 +194,15 @@ class HyperOptmisation():
 
                 # Create the model
                 model = gNetDGPModel(
-                    gene_feature_dim=gene_net_data.x.shape[1],
-                    disease_feature_dim=disease_net_data.x.shape[1],
-                    fc_hidden_dim=2048,
-                    gene_net_hidden_dim=512,
-                    disease_net_hidden_dim=512,
+                    gene_feature_dim=self.gene_net_data.x.shape[1],
+                    disease_feature_dim=self.disease_net_data.x.shape[1],
+                    fc_hidden_dim=fc_hidden_dim,
+                    gene_net_hidden_dim=gene_net_hidden_dim,
+                    disease_net_hidden_dim=disease_net_hidden_dim,
                     mode='DGP'
                 ).to(device)
-            
-                config = { 
-                   'learning_rate': config['learning_rate']
-                }
-                optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=0.18)
+                
+                optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
             
                 print(f'Stat training fold {fold}/{folds}:')
 
@@ -216,23 +210,12 @@ class HyperOptmisation():
                 losses['train'] = list()
                 losses['val'] = list()
 
-                losses['mono'] = {
-                    'AUC': 0,
-                    'TPR': None,
-                    'FPR': None
-                }
-                losses['multi'] = {
-                    'AUC': 0,
-                    'TPR': None,
-                    'FPR': None
-                }
-
                 best_val_loss = 1e80
                 for epoch in range(max_epochs):
                     # Train model.
                     model.train()
                     optimizer.zero_grad()
-                    out = model(gene_net_data, disease_net_data, train_x)
+                    out = model(self.gene_net_data, self.disease_net_data, train_x)
                     loss = criterion(out, train_y)
                     loss.backward()
                     optimizer.step()
@@ -241,7 +224,7 @@ class HyperOptmisation():
                     # Validation.
                     with torch.no_grad():
                         model.eval()
-                        out = model(gene_net_data, disease_net_data, val_x)
+                        out = model(self.gene_net_data, self.disease_net_data, val_x)
                         loss = criterion(out, val_y)
                         current_val_loss = loss.item()
                         losses['val'].append(current_val_loss)
@@ -252,17 +235,19 @@ class HyperOptmisation():
                                     epoch, losses['train'][epoch], losses['val'][epoch]
                                 )
                             )
-            return np.mean(losses['val'])
+                print(losses)
+                return np.mean(losses['train'])
             
         space_params = {
-            'learning_rate': hp.loguniform('learning_rate', -5, 0)
+            'learning_rate': hp.loguniform('learning_rate', -5, -4),
+            'weight_decay': hp.uniform('weight_decay', 0, 0.5)
         }
-        trails = Trials()
-        best=fmin(fn=optimise_params, # function to optimize
+        trials = Trials()
+        best = fmin(fn=optimise_params, # function to optimize
               space=space_params, 
               algo=tpe.suggest, # optimization algorithm, hyperotp will select its parameters automatically
               max_evals=3, # maximum number of iterations
-              trials=trails, # logging
+              trials=trials, # logging
               #rstate=np.random.RandomState(random_state) # fixing random state for the reproducibility
         )
         print("Optimisation finished...")
