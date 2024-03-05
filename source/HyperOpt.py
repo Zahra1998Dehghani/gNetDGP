@@ -22,11 +22,11 @@ from source.gNetDGPModel import gNetDGPModel
 
 class HyperOptmisation():
     
-    def run_optimisation(self, folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, model_tmp_storage, results_storage):
+    def run_optimisation(self, folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, optimised_model_storage):
         print("Running optimisation...")
         print("Creating datasets folds...")
         negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping = self.setup_data(gene_dataset_root, disease_dataset_root, training_data_path)
-        self.train_optimise(negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs)
+        self.train_optimise(folds, negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs, optimised_model_storage)
         print("Setting up optimisation values...")
         print("Best values of hyperparameters")
         print("Finished optimisation")
@@ -140,15 +140,16 @@ class HyperOptmisation():
     
     def train_optimise(
         self,
+        folds,
         negatives,
         positives,
         cov_diseases, 
         g_i_f_mapping,
         d_i_i_mapping,
-        max_epochs=5,
+        max_epochs,
+        optimised_model_storage,
         early_stopping_window=5,
-        info_each_epoch=1,
-        folds=5, 
+        info_each_epoch=1, 
         lr=0.0005,
         weight_decay=5e-4,
         fc_hidden_dim=2048,
@@ -165,10 +166,14 @@ class HyperOptmisation():
         #disease_net_data = self.disease_net_data
 
         from hyperopt import hp
-        from hyperopt import fmin, tpe, hp, anneal, Trials
+        from hyperopt import fmin, tpe, hp, anneal, Trials, STATUS_OK
         
         def optimise_params(config):
             fold = 0
+            all_losses = {}
+            all_losses['fold_train'] = list()
+            all_losses['fold_val'] = list()
+            
             kf = KFold(n_splits=folds, shuffle=True, random_state=42)
             for train_index, test_index in kf.split(cov_diseases):
                 fold += 1
@@ -196,19 +201,27 @@ class HyperOptmisation():
                 model = gNetDGPModel(
                     gene_feature_dim=self.gene_net_data.x.shape[1],
                     disease_feature_dim=self.disease_net_data.x.shape[1],
-                    fc_hidden_dim=fc_hidden_dim,
-                    gene_net_hidden_dim=gene_net_hidden_dim,
-                    disease_net_hidden_dim=disease_net_hidden_dim,
+                    fc_hidden_dim=int(config["fc_hidden_dim"]),
+                    gene_net_hidden_dim=int(config["gene_net_hidden_dim"]),
+                    disease_net_hidden_dim=int(config["disease_net_hidden_dim"]),
                     mode='DGP'
                 ).to(device)
-                
                 optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
-            
                 print(f'Stat training fold {fold}/{folds}:')
 
                 losses = dict()
                 losses['train'] = list()
                 losses['val'] = list()
+                losses['mono'] = {
+                    'AUC': 0,
+                    'TPR': None,
+                    'FPR': None
+                }
+                losses['multi'] = {
+                    'AUC': 0,
+                    'TPR': None,
+                    'FPR': None
+                }
 
                 best_val_loss = 1e80
                 for epoch in range(max_epochs):
@@ -235,20 +248,63 @@ class HyperOptmisation():
                                     epoch, losses['train'][epoch], losses['val'][epoch]
                                 )
                             )
-                print(losses)
-                return np.mean(losses['train'])
+                print("Fold: {}, train_loss: {}, val_loss: {}".format(fold+1, np.mean(losses['train']), np.mean(losses['val'])))
+                all_losses['fold_train'].append(np.mean(losses['train']))
+                all_losses['fold_val'].append(np.mean(losses['val']))
+
+                with torch.no_grad():
+                    for modus in ['multi', 'mono']:
+                        predicted_probs = F.log_softmax(
+                            model(self.gene_net_data, self.disease_net_data, test_x[modus]).clone().detach(), dim=1
+                        )
+                        true_y = test_y[modus]
+                        fpr, tpr, _ = roc_curve(true_y.cpu().detach().numpy(), predicted_probs[:, 1].cpu().detach().numpy(),
+                                            pos_label=1)
+                        roc_auc = auc(fpr, tpr)
+                        losses[modus]['TEST_Y'] = true_y.cpu().detach().numpy()
+                        losses[modus]['TEST_PREDICT'] = predicted_probs.cpu().numpy()
+                        losses[modus]['AUC'] = roc_auc
+                        losses[modus]['TPR'] = tpr
+                        losses[modus]['FPR'] = fpr
+                        print(f'"{modus}" auc for fold {fold}: {roc_auc}')
+                metrics.append(losses)
+                
+            print("All folds, all epochs, validation loss: {}".format(all_losses['fold_val']))
+            print("Trial ended, train_loss: {}, val_loss: {}".format(np.mean(all_losses['fold_train']), np.mean(all_losses['fold_val'])))
+            
+            return {'loss': np.mean(all_losses['fold_val']), 'status': STATUS_OK, 'model': model}
+
+        #@click.option('--fc_hidden_dim', default=3000)
+        #@click.option('--gene_net_hidden_dim', default=830)
+        #@click.option('--disease_net_hidden_dim', default=500)
+        #lr=0.0005,
+        #weight_decay=5e-4,
+        #fc_hidden_dim=2048,
+        #gene_net_hidden_dim=512,
+        #disease_net_hidden_dim=512
             
         space_params = {
             'learning_rate': hp.loguniform('learning_rate', -5, -4),
-            'weight_decay': hp.uniform('weight_decay', 0, 0.5)
+            'weight_decay': hp.uniform('weight_decay', 0, 0.5),
+            'fc_hidden_dim': hp.uniform('fc_hidden_dim', 128, 4096),
+            'gene_net_hidden_dim': hp.uniform('gene_net_hidden_dim', 128, 1024),
+            'disease_net_hidden_dim': hp.uniform('disease_net_hidden_dim', 128, 1024)
         }
         trials = Trials()
-        best = fmin(fn=optimise_params, # function to optimize
-              space=space_params, 
-              algo=tpe.suggest, # optimization algorithm, hyperotp will select its parameters automatically
-              max_evals=3, # maximum number of iterations
-              trials=trials, # logging
-              #rstate=np.random.RandomState(random_state) # fixing random state for the reproducibility
+        SEED = 12345
+        best=fmin(
+            fn=optimise_params, # function to optimize
+            space=space_params, 
+            algo=tpe.suggest, # optimization algorithm
+            max_evals=5, # maximum number of trials
+            trials=trials, # logging
+            rstate=np.random.default_rng(SEED) # fixing random state for the reproducibility
         )
-        print("Optimisation finished...")
-        print(best)
+        print(trials)
+        print("Index for best model: {}".format(np.argmin([r['loss'] for r in trials.results])))
+        for i, res in enumerate(trials.results):
+            print(i, res["loss"])
+        print()
+        best_model = trials.results[np.argmin([r['loss'] for r in trials.results])]['model']
+        torch.save(best_model.state_dict(), optimised_model_storage + '/best_optmised_model.ptm')
+        print("Optimisation finished")

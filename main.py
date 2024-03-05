@@ -16,8 +16,8 @@ def cli():
 @click.option('--gene_dataset_root', default='./data/gene_net')
 @click.option('--disease_dataset_root', default='./data/disease_net')
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
-@click.option('--model_tmp_storage', default='/tmp')
-@click.option('--results_storage', default='./out')
+@click.option('--optimised_model_storage', default='./model')
+#@click.option('--results_storage', default='./out')
 def optimise_parameters(
         folds,
         max_epochs,
@@ -25,8 +25,7 @@ def optimise_parameters(
         gene_dataset_root,
         disease_dataset_root,
         training_data_path,
-        model_tmp_storage,
-        results_storage
+        optimised_model_storage
 ):
     opt =  HyperOptmisation()
     opt.run_optimisation(
@@ -36,8 +35,7 @@ def optimise_parameters(
         gene_dataset_root,
         disease_dataset_root,
         training_data_path,
-        model_tmp_storage,
-        results_storage
+        optimised_model_storage
     )
 
 @click.command()
