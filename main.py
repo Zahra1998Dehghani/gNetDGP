@@ -12,6 +12,7 @@ def cli():
 @click.command()
 @click.option('--folds', default=5)
 @click.option('--max_epochs', default=500)
+@click.option('--max_trials', default=5)
 @click.option('--early_stopping_window', default=20)
 @click.option('--gene_dataset_root', default='./data/gene_net')
 @click.option('--disease_dataset_root', default='./data/disease_net')
@@ -21,6 +22,7 @@ def cli():
 def optimise_parameters(
         folds,
         max_epochs,
+        max_trials,
         early_stopping_window,
         gene_dataset_root,
         disease_dataset_root,
@@ -31,6 +33,7 @@ def optimise_parameters(
     opt.run_optimisation(
         folds,
         max_epochs,
+        max_trials,
         early_stopping_window,
         gene_dataset_root,
         disease_dataset_root,
@@ -103,6 +106,7 @@ def generic_train(
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    print(gene_dataset)
     gene_net_data = gene_dataset[0]
     disease_net_data = disease_dataset[0]
     gene_net_data = gene_net_data.to(device)
@@ -567,6 +571,7 @@ def specific_train(
         columns=['disease_id', 'disease_node_index']
     )
 
+    print(unique_labeled_disease_class_genes)
     # Create the gene index
     # Join in the gene node indexes
     disease_class_training_data = pd.merge(
@@ -576,6 +581,9 @@ def specific_train(
         right_on='gene_id',
         validate='many_to_many'
     )
+
+    import sys
+    sys.exit()
 
     disease_class_counts = disease_class_training_data['disease_class'].value_counts()
     disease_class_target_classes = [

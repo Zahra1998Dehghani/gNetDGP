@@ -22,11 +22,11 @@ from source.gNetDGPModel import gNetDGPModel
 
 class HyperOptmisation():
     
-    def run_optimisation(self, folds, max_epochs, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, optimised_model_storage):
+    def run_optimisation(self, folds, max_epochs, max_trials, early_stopping_window, gene_dataset_root, disease_dataset_root, training_data_path, optimised_model_storage):
         print("Running optimisation...")
         print("Creating datasets folds...")
         negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping = self.setup_data(gene_dataset_root, disease_dataset_root, training_data_path)
-        self.train_optimise(folds, negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs, optimised_model_storage)
+        self.train_optimise(folds, negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs, max_trials, optimised_model_storage)
         print("Setting up optimisation values...")
         print("Best values of hyperparameters")
         print("Finished optimisation")
@@ -147,6 +147,7 @@ class HyperOptmisation():
         g_i_f_mapping,
         d_i_i_mapping,
         max_epochs,
+        max_trials,
         optimised_model_storage,
         early_stopping_window=5,
         info_each_epoch=1, 
@@ -296,7 +297,7 @@ class HyperOptmisation():
             fn=optimise_params, # function to optimize
             space=space_params, 
             algo=tpe.suggest, # optimization algorithm
-            max_evals=5, # maximum number of trials
+            max_evals=max_trials, # maximum number of trials
             trials=trials, # logging
             rstate=np.random.default_rng(SEED) # fixing random state for the reproducibility
         )
