@@ -18,7 +18,6 @@ def cli():
 @click.option('--disease_dataset_root', default='./data/disease_net')
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
 @click.option('--optimised_model_storage', default='./model')
-#@click.option('--results_storage', default='./out')
 def optimise_parameters(
         folds,
         max_epochs,

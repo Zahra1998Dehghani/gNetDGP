@@ -27,8 +27,6 @@ class HyperOptmisation():
         print("Creating datasets folds...")
         negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping = self.setup_data(gene_dataset_root, disease_dataset_root, training_data_path)
         self.train_optimise(folds, negatives, positives, cov_disease, g_i_f_mapping, d_i_i_mapping, max_epochs, max_trials, optimised_model_storage)
-        print("Setting up optimisation values...")
-        print("Best values of hyperparameters")
         print("Finished optimisation")
  
     def create_objective(self):
@@ -301,11 +299,12 @@ class HyperOptmisation():
             trials=trials, # logging
             rstate=np.random.default_rng(SEED) # fixing random state for the reproducibility
         )
-        print(trials)
-        print("Index for best model: {}".format(np.argmin([r['loss'] for r in trials.results])))
+        print("Validation losses for each trial")
         for i, res in enumerate(trials.results):
             print(i, res["loss"])
         print()
+        print("Optimised parameters")
+        print(best)
         best_model = trials.results[np.argmin([r['loss'] for r in trials.results])]['model']
         torch.save(best_model.state_dict(), optimised_model_storage + '/best_optmised_model.ptm')
         print("Optimisation finished")
