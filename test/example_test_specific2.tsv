@@ -4,7 +4,6 @@
 # Usage: python main.py specific-predict ./test/example_input_specific.tsv #
 # Entrez_Gene_ID (one per line).
 9043
-161424
 80070
 4585
 53942
@@ -21,13 +20,9 @@
 5445
 367
 6533
-129285
-116362
 9663
-10206
 6854
 55603
-221656
 63895
 54829
 5830
