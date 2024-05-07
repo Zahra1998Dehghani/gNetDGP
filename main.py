@@ -245,7 +245,7 @@ def generic_train(
                 disease_net_hidden_dim=disease_net_hidden_dim,
                 mode='DGP'
             ).to(device)
-            #model.load_state_dict(torch.load(model_path, map_location=device))
+            model.load_state_dict(torch.load(model_path, map_location=device))
             #def freeze_layers(model, layers_to_freeze):
             #    for name, param in model.named_parameters():
             #        if any(layer_name in name for layer_name in layers_to_freeze):
@@ -353,9 +353,9 @@ def generic_train(
         #torch.save(model, 'model.pth')
         #torch.save(model.state_dict(), osp.join(model_tmp_storage, 'Mouse_tmp_model_state.ptm'))
         #torch.save(model.state_dict(), './model/Human_tmp_model_state.ptm')
-        torch.save(model.state_dict(),  './model/Mouse_tmp_model_state.ptm')
+        #torch.save(model.state_dict(),  './model/Mouse_tmp_model_state.ptm')
         #print(model.named_parameters())
-        #torch.save(model.state_dict(),  './model/Pretrain_Mouse_Finetune_Human_tmp_model_state.ptm')
+        torch.save(model.state_dict(),  './model/Pretrain_Mouse_Finetune_Human_tmp_model_state.ptm')
         print('Done!')
         return metrics, dis_dict, model
 
