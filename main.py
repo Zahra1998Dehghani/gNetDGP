@@ -1,5 +1,8 @@
 import click
-
+import json
+import random
+import torch.nn.init as init
+import numpy as np
 from source.DiseaseNet import DiseaseNet
 from source.GeneNet import GeneNet
 from source.gNetDGPModel import gNetDGPModel
@@ -13,7 +16,7 @@ def cli():
 @click.option('--folds', default=5)
 @click.option('--max_epochs', default=500)
 @click.option('--max_trials', default=5)
-@click.option('--early_stopping_window', default=20)
+@click.option('--early_stopping_window', default=20) 
 @click.option('--gene_dataset_root', default='./data/gene_net')
 @click.option('--disease_dataset_root', default='./data/disease_net')
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
@@ -46,13 +49,15 @@ def optimise_parameters(
 @click.option('--disease_net_hidden_dim', default=500)
 @click.option('--folds', default=5)
 @click.option('--max_epochs', default=500)
-@click.option('--early_stopping_window', default=20)
+@click.option('--early_stopping_window', default=20) 
 @click.option('--lr', default=0.00004, help='Learning rate')
 @click.option('--weight_decay', default=0.15)
 @click.option('--gene_dataset_root', default='./data/gene_net')
 @click.option('--disease_dataset_root', default='./data/disease_net')
 @click.option('--training_data_path', default='./data/training/genes_diseases.tsv')
+@click.option('--training_disease_class_assignments_path', default='./data/training/extracted_disease_class_assignments.tsv')
 @click.option('--model_tmp_storage', default='/tmp')
+@click.option('--model_path', default='./model/Mouse_tmp_model_state.ptm')
 @click.option('--results_storage', default='./out')
 @click.option('--experiment_slug', default='train_generic')
 def generic_train(
@@ -67,8 +72,10 @@ def generic_train(
         gene_dataset_root,
         disease_dataset_root,
         training_data_path,
-        model_tmp_storage,
-        results_storage,
+	model_tmp_storage,
+        model_path,
+	results_storage,    
+        training_disease_class_assignments_path, 
         experiment_slug
 ):
     print('Import modules')
@@ -84,6 +91,7 @@ def generic_train(
     import numpy as np
     from sklearn.metrics import roc_curve, auc
     from sklearn.model_selection import KFold, train_test_split
+    from sklearn.model_selection import StratifiedKFold
 
     print('Load the gene and disease graphs.')
     gene_dataset = GeneNet(
@@ -118,23 +126,31 @@ def generic_train(
         sep='\t',
         low_memory=False,
         dtype={'EntrezGene ID': pd.Int64Dtype()}
+	
     )
-
+    #disease_genes = disease_genes.sample(frac=1)
     disease_id_index_feature_mapping = disease_dataset.load_disease_index_feature_mapping()
     gene_id_index_feature_mapping = gene_dataset.load_node_index_mapping()
 
     all_genes = list(gene_id_index_feature_mapping.keys())
     all_diseases = list(disease_id_index_feature_mapping.keys())
 
+    #print(f'Disease list {all_diseases}.')
     # 1. generate positive pairs.
+
+
+
     # Filter the pairs to only include the ones where the corresponding nodes are available.
     # i.e. gene_id should be in all_genes and disease_id should be in all_diseases.
     positives = disease_genes[
         disease_genes["OMIM ID"].isin(all_diseases) & disease_genes["EntrezGene ID"].isin(all_genes)
         ]
+    #print(len(positives))
     covered_diseases = list(set(positives['OMIM ID']))
+    #print(f' covered_diseases {covered_diseases}.')
     covered_genes = list(set(positives['EntrezGene ID']))
-
+    #print(len(covered_diseases))
+    #print(len(covered_genes))
     # 2. Generate negatives.
     # Pick equal amount of pairs not in the positives.
     negatives_list = []
@@ -144,7 +160,7 @@ def generic_train(
         if not ((positives['OMIM ID'] == disease_id) & (positives['EntrezGene ID'] == gene_id)).any():
             negatives_list.append([disease_id, gene_id])
     negatives = pd.DataFrame(np.array(negatives_list), columns=['OMIM ID', 'EntrezGene ID'])
-
+    #print(len(negatives))
     def get_training_data_from_indexes(indexes, monogenetic_disease_only=False, multigenetic_diseases_only=False):
         train_tuples = set()
         for idx in indexes:
@@ -169,7 +185,7 @@ def generic_train(
 
     def train(
             max_epochs,
-            early_stopping_window=5,
+            early_stopping_window=110,
             info_each_epoch=1,
             folds=5,
             lr=0.0005,
@@ -183,10 +199,23 @@ def generic_train(
         dis_dict = {}
         fold = 0
         start_time = time.time()
+        #disease_class_training_data = pd.read_csv(training_disease_class_assignments_path, sep='\t')
+        #x1 = disease_class_training_data.gene_id
+        #x2 = disease_class_training_data.disease_id
+        #y = disease_class_training_data.disease_class
+        #x = np.array(x1,x2)
         kf = KFold(n_splits=folds, shuffle=True, random_state=42)
+        # Assuming y is your categorical variable
+        # Convert y to pandas Series if it's not already
+        #y = pd.Series(y)
+        # Perform one-hot encoding
+        #y_encoded = pd.get_dummies(y)
+        #skf = StratifiedKFold(n_splits=5)
+        #for train_index, test_index in skf.split(x, y):
         for train_index, test_index in kf.split(covered_diseases):
             fold += 1
             print(f'Generate training data for fold {fold}.')
+            #print(train_index)
             all_train_x, all_train_y = get_training_data_from_indexes(train_index)
 
             # Split into train and validation set.
@@ -216,6 +245,24 @@ def generic_train(
                 disease_net_hidden_dim=disease_net_hidden_dim,
                 mode='DGP'
             ).to(device)
+            #model.load_state_dict(torch.load(model_path, map_location=device))
+            #def freeze_layers(model, layers_to_freeze):
+            #    for name, param in model.named_parameters():
+            #        if any(layer_name in name for layer_name in layers_to_freeze):
+            #            param.requires_grad = False
+            #layers_to_freeze = ['gene_conv_0', 'gene_conv_1', 'disease_conv_0', 'disease_conv_1']
+            #layers_to_freeze = ['bn_gene_0', 'bn_gene_1', 'bn_disease_0', 'bn_disease_1']
+            #layers_to_freeze = ['gene_conv_0', 'gene_conv_1', 'disease_conv_0', 'disease_conv_1', 'bn_gene_0', 'bn_gene_1', 'bn_disease_0', 'bn_disease_1']
+            #layers_to_freeze = ['gene_conv_0', 'bn_gene_0', 'disease_conv_0','bn_disease_0']
+            #freeze_layers(model, layers_to_freeze)
+            #print('\n'.join([f'Layer "{name}" is frozen.' if not param.requires_grad else f'Layer "{name}" is trainable.' for name, param in model.named_parameters()]))
+            #with open('model_info.txt', 'w') as f:
+            #    f.write('\n'.join([f'Layer "{name}" is frozen.' if not param.requires_grad else f'Layer "{name}" is trainable.' for name, param in model.named_parameters()]))
+            #model = torch.load('model.pth')
+            #with open('model.json', 'r') as f:
+            #    model_params_serializable = json.load(f)
+            #model_params = {key: torch.tensor(value) if isinstance(value, list) else value for key, value in model_params_serializable.items()}
+            #model.load_state_dict(model_params)
             optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
             print(f'Stat training fold {fold}/{folds}:')
 
@@ -244,16 +291,18 @@ def generic_train(
                 loss.backward()
                 optimizer.step()
                 losses['train'].append(loss.item())
-
+            #with open('validation_results.txt', 'a') as f:
                 # Validation.
                 with torch.no_grad():
                     model.eval()
+                    #params = model.state_dict()
                     out = model(gene_net_data, disease_net_data, val_x)
                     loss = criterion(out, val_y)
                     current_val_loss = loss.item()
                     losses['val'].append(current_val_loss)
 
                     if epoch % info_each_epoch == 0:
+                        #f.write('Epoch {}, train_loss: {:.4f}, val_loss: {:.4f}\n' .format(epoch, losses['train'][epoch], losses['val'][epoch]))
                         print(
                             'Epoch {}, train_loss: {:.4f}, val_loss: {:.4f}'.format(
                                 epoch, losses['train'][epoch], losses['val'][epoch]
@@ -262,6 +311,9 @@ def generic_train(
                     if current_val_loss < best_val_loss:
                         best_val_loss = current_val_loss
                         torch.save(model.state_dict(), osp.join(model_tmp_storage, f'best_model_fold_{fold}.ptm'))
+                        #torch.save(model.state_dict(), 'model.pth')
+                        # Write parameters to a text file in one line
+                        # with open('model_parameters.txt', 'w') as f: f.write('\n'.join([str(param) for param in model.state_dict().items()]))
 
                 # Early stopping
                 if epoch > early_stopping_window:
@@ -269,6 +321,7 @@ def generic_train(
                     # w.r.t. the past early_stopping_window consecutive epochs.
                     last_window_losses = losses['val'][epoch - early_stopping_window:epoch]
                     if losses['val'][-1] > max(last_window_losses):
+                        #f.write('Early Stopping!\n')
                         print('Early Stopping!')
                         break
 
@@ -292,7 +345,17 @@ def generic_train(
                     losses[modus]['FPR'] = fpr
                     print(f'"{modus}" auc for fold: {fold}: {roc_auc}')
             metrics.append(losses)
-
+        #initilaization with mouse data
+        #model_params = model.state_dict()
+        #model_params_serializable = {key: value.cpu().numpy().tolist() if isinstance(value, torch.Tensor) else value for key, value in model_params.items()}
+        #with open('model.json', 'w') as f:
+        #    json.dump(model_params_serializable, f)
+        #torch.save(model, 'model.pth')
+        #torch.save(model.state_dict(), osp.join(model_tmp_storage, 'Mouse_tmp_model_state.ptm'))
+        #torch.save(model.state_dict(), './model/Human_tmp_model_state.ptm')
+        torch.save(model.state_dict(),  './model/Mouse_tmp_model_state.ptm')
+        #print(model.named_parameters())
+        #torch.save(model.state_dict(),  './model/Pretrain_Mouse_Finetune_Human_tmp_model_state.ptm')
         print('Done!')
         return metrics, dis_dict, model
 
